@@ -28,6 +28,7 @@ package com.noveogroup.android.log;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -57,7 +58,9 @@ import java.util.regex.Pattern;
  */
 public final class LoggerManager {
 
-    private LoggerManager() {
+    private static final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH_mm_ss");
+
+	private LoggerManager() {
         throw new UnsupportedOperationException();
     }
 
@@ -70,6 +73,7 @@ public final class LoggerManager {
     private static final String CONF_ROOT = "root";
     private static final String CONF_LOGGER = "logger.";
     private static final Pattern CONF_LOGGER_REGEX = Pattern.compile("(.*?):(.*?)(:(.*))?");
+	public static final String LOCAL_FILE_LOCATION = "LOCAL_FILE_LOCATION";
 
     private static void loadProperties(Properties properties) throws IOException {
         InputStream inputStream = null;
@@ -90,7 +94,7 @@ public final class LoggerManager {
         }
     }
 
-    private static Handler decodeHandler(String handlerString) {
+    private static Handler decodeHandler(String handlerString, String localFile) {
         Matcher matcher = CONF_LOGGER_REGEX.matcher(handlerString);
         if (matcher.matches()) {
             String levelString = matcher.group(1);
@@ -102,7 +106,7 @@ public final class LoggerManager {
                 tag = trimmedTag;
             }
             try {
-                return new PatternHandler(Logger.Level.valueOf(levelString), tag, message);
+                return new PatternHandler(Logger.Level.valueOf(levelString), tag, message, localFile);
             } catch (IllegalArgumentException e) {
                 DEFAULT_LOGGER.w("Cannot parse '%s' as logging level. Only %s are allowed",
                         levelString, Arrays.toString(Logger.Level.values()));
@@ -126,7 +130,7 @@ public final class LoggerManager {
             handlerMap.put(null, DEFAULT_HANDLER);
             return handlerMap;
         }
-
+        
         // something is wrong if property file is empty
         if (!properties.propertyNames().hasMoreElements()) {
             DEFAULT_LOGGER.e("Logger configuration file is empty. Default configuration will be used");
@@ -134,12 +138,18 @@ public final class LoggerManager {
             return handlerMap;
         }
 
+        String localFile = null;
+		if (properties.containsKey(LOCAL_FILE_LOCATION)) {
+        	localFile = properties.getProperty(LOCAL_FILE_LOCATION);
+        	localFile = localFile.replace("${dateTime}", sdf.format(new Date()));
+        }
+        
         // parse properties to logger map
         for (Enumeration<?> names = properties.propertyNames(); names.hasMoreElements(); ) {
             String propertyName = (String) names.nextElement();
             String propertyValue = properties.getProperty(propertyName);
 
-            Handler handler = decodeHandler(propertyValue);
+            Handler handler = decodeHandler(propertyValue, localFile);
             if (handler != null) {
                 if (propertyName.equals(CONF_ROOT)) {
                     handlerMap.put(null, handler);
@@ -159,7 +169,7 @@ public final class LoggerManager {
         if (!handlerMap.containsKey(null)) {
             handlerMap.put(null, DEFAULT_HANDLER);
         }
-
+        
         return handlerMap;
     }
 
@@ -212,6 +222,18 @@ public final class LoggerManager {
         // return logger
         return logger;
     }
+    
+    public static void enableGlobalDebugLevel() {
+    	for (String key : HANDLER_MAP.keySet()) {
+			HANDLER_MAP.get(key).enableDebugLevelOverride();
+		}
+    }
+    
+    public static void disableGlobalDebugLevel() {
+    	for (String key : HANDLER_MAP.keySet()) {
+			HANDLER_MAP.get(key).disableDebugLevelOverride();
+		}		
+	}
 
     /**
      * Returns logger corresponding to the specified class.
@@ -231,5 +253,6 @@ public final class LoggerManager {
     public static Logger getLogger() {
         return getLogger(Utils.getCallerClassName());
     }
+
 
 }

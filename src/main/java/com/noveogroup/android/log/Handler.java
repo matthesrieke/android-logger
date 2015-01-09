@@ -64,4 +64,8 @@ public interface Handler {
     public void print(String loggerName, Logger.Level level,
                       Throwable throwable, String messageFormat, Object... args) throws IllegalArgumentException;
 
+	public void enableDebugLevelOverride();
+	
+	public void disableDebugLevelOverride();
+
 }

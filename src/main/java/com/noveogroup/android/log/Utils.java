@@ -26,6 +26,11 @@
 
 package com.noveogroup.android.log;
 
+import java.io.File;
+import java.io.IOException;
+
+import android.os.Environment;
+
 public final class Utils {
 
     private Utils() {
@@ -36,14 +41,14 @@ public final class Utils {
 
     private static final class CallerResolver extends SecurityManager {
         public Class<?> getCaller() {
-            Class[] classContext = getClassContext();
+            Class<?>[] classContext = getClassContext();
             // sometimes class context is null (usually on new Android devices)
             if (classContext == null || classContext.length <= 0) {
                 return null; // if class context is null or empty
             }
 
             boolean packageFound = false;
-            for (Class aClass : classContext) {
+            for (Class<?> aClass : classContext) {
                 if (!packageFound) {
                     if (aClass.getPackage().getName().startsWith(PACKAGE_NAME)) {
                         packageFound = true;
@@ -264,5 +269,34 @@ public final class Utils {
         }
         return builder.toString();
     }
-
+    
+    
+	/**
+	 * Create a file in the .enviroCar folder of the external storage.
+	 * 
+	 * @param fileName
+	 *            the name of the new file
+	 * @return the resulting file
+	 * @throws IOException
+	 */
+	public static File createFileOnExternalStorage(String fileName)
+			throws IOException {
+		File directory = Environment.getExternalStorageDirectory();
+		
+		File f = new File(directory, fileName);
+		if (!f.exists()) {
+			File p = f.getParentFile();
+			if (p != null && !p.equals(directory)) {
+				p.mkdirs();
+			}
+			f.createNewFile();
+		}
+		
+		if (!f.isFile()) {
+			throw new IOException(fileName + " is not a file!");
+		}
+		
+		return f;
+	}
+	
 }

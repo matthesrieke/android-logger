@@ -28,8 +28,14 @@ package com.noveogroup.android.log;
 
 import android.util.Log;
 
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Formatter;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * The basic implementation of {@link Handler} interface.
@@ -255,11 +261,15 @@ import java.util.Formatter;
  */
 public class PatternHandler implements Handler {
 
+	private static final byte[] LINE_SEPARATOR = System.getProperty("line.separator").getBytes();
     private final Logger.Level level;
     private final String tagPattern;
     private final String messagePattern;
     private final Pattern compiledTagPattern;
     private final Pattern compiledMessagePattern;
+	private LocalFileWriter localFile;
+	private boolean debugLevelOverride;
+	private static Map<String, LocalFileWriter> localFileWriters = new HashMap<String, PatternHandler.LocalFileWriter>();
 
     /**
      * Creates new {@link PatternHandler}.
@@ -276,6 +286,23 @@ public class PatternHandler implements Handler {
         this.compiledMessagePattern = Pattern.compile(messagePattern);
     }
 
+    public PatternHandler(Logger.Level level, String tagPattern, String messagePattern, String localFile) {
+    	this(level, tagPattern, messagePattern);
+    	try {
+    		synchronized (PatternHandler.class) {
+    			if (!localFileWriters.containsKey(localFile)) {
+        			this.localFile = new LocalFileWriter(localFile);
+        			localFileWriters.put(localFile, this.localFile);
+        		}
+    			else {
+    				this.localFile = localFileWriters.get(localFile);
+    			}
+			}
+		} catch (IOException e) {
+			Log.e(createTag(getClass().getName(), resolveCaller()), e.getMessage(), e);
+		}
+    }
+    
     /**
      * Returns the level.
      *
@@ -305,6 +332,9 @@ public class PatternHandler implements Handler {
 
     @Override
     public boolean isEnabled(Logger.Level level) {
+    	if (this.debugLevelOverride) {
+    		return true;
+    	}
         return this.level != null && level != null && this.level.includes(level);
     }
 
@@ -312,40 +342,106 @@ public class PatternHandler implements Handler {
     public void print(String loggerName, Logger.Level level,
                       Throwable throwable, String messageFormat, Object... args) throws IllegalArgumentException {
         if (isEnabled(level)) {
-            String message;
+            StringBuilder message = new StringBuilder();
 
             if (messageFormat == null) {
                 if (args != null && args.length > 0) {
                     throw new IllegalArgumentException("message format is not set but arguments are presented");
                 }
 
-                if (throwable == null) {
-                    message = "";
-                } else {
-                    message = Log.getStackTraceString(throwable);
+                if (throwable != null) {
+                    message.append(Log.getStackTraceString(throwable));
                 }
             } else {
                 if (throwable == null) {
-                    message = String.format(messageFormat, args);
+                	if (args == null || args.length == 0) {
+                		message.append(messageFormat);
+                	}
+                	else {
+                		message.append(String.format(messageFormat, args));
+                	}
                 } else {
-                    message = String.format(messageFormat, args) + '\n' + Log.getStackTraceString(throwable);
+                    message.append(String.format(messageFormat, args));
+                    message.append('\n');
+                    message.append(Log.getStackTraceString(throwable));
                 }
             }
 
-            StackTraceElement caller = null;
-            if ((compiledTagPattern != null && compiledTagPattern.isCallerNeeded())
-                    || (compiledMessagePattern != null && compiledMessagePattern.isCallerNeeded())) {
-                caller = Utils.getCaller();
-            }
-
-            String tag = compiledTagPattern == null ? "" : compiledTagPattern.apply(caller, loggerName, level);
+            StackTraceElement caller = resolveCaller();
+            String tag = createTag(loggerName, caller);
             String messageHead = compiledMessagePattern == null ? "" : compiledMessagePattern.apply(caller, loggerName, level);
 
             if (messageHead.length() > 0 && !Character.isWhitespace(messageHead.charAt(0))) {
-                messageHead = messageHead + " ";
+            	message.insert(0, " ");
+            	message.insert(0, messageHead);
             }
-            Log.println(level.intValue(), tag, messageHead + message);
+            Log.println(level.intValue(), tag, message.toString());
+            
+            if (localFile != null) {
+            	message.insert(0, "] ");
+            	message.insert(0, level.toString());
+            	message.insert(0, "[");
+            	localFile.println(message.toString());
+            }
         }
     }
 
+    private String createTag(String loggerName, StackTraceElement providedCaller) {
+    	StackTraceElement caller;
+		if (providedCaller != null) {
+    		caller = providedCaller;
+    	}
+    	else {
+    		caller = resolveCaller();
+    	}
+
+        String tag = compiledTagPattern == null ? "" : compiledTagPattern.apply(caller, loggerName, level);
+        return tag;
+    }
+
+	private StackTraceElement resolveCaller() {
+		StackTraceElement caller = null;
+        if ((compiledTagPattern != null && compiledTagPattern.isCallerNeeded())
+                || (compiledMessagePattern != null && compiledMessagePattern.isCallerNeeded())) {
+            caller = Utils.getCaller();
+        }
+		return caller;
+	}
+
+	private class LocalFileWriter {
+
+		private File file;
+
+		public LocalFileWriter(String localFile) throws IOException {
+			this.file = createFile(localFile);
+		}
+
+		private File createFile(String localFile) throws IOException {
+			return Utils.createFileOnExternalStorage(localFile);
+		}
+
+		public synchronized void println(String string) {
+			try {
+				BufferedOutputStream stream = new BufferedOutputStream(new FileOutputStream(file, true));
+				stream.write(string.getBytes());
+				stream.write(LINE_SEPARATOR);
+				stream.flush();
+				stream.close();
+			} catch (IOException e) {
+				Log.e(createTag(getClass().getName(), resolveCaller()), e.getMessage(), e);
+			}
+			
+		}
+    	
+    }
+
+	@Override
+	public void enableDebugLevelOverride() {
+		this.debugLevelOverride = true;
+	}
+
+	@Override
+	public void disableDebugLevelOverride() {
+		this.debugLevelOverride = false;
+	}
 }
